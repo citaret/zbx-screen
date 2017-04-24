@@ -1,0 +1,20 @@
+auth:
+    host_url: http://zabbix.your-server.com/zabbix
+    username: your-username
+    password: your-password
+
+groups:
+-
+    items:
+        - Network traffic on eth0
+        - Number of online users
+    names:
+        # - Swans-100
+        # - Swans-150
+        # - Swans-200
+        # - Swans-250
+        # - Swans-800
+        # - Swans-900
+        # - Swans-Pro
+        - Swans-test1
+        # - Swans-test2
