@@ -25,40 +25,36 @@ def get_graphs(zapi, hosts, items):
     graphids = []
     for host in hosts:
         logging.info("Getting graphs of: %s" % host[0])
-        response = zapi.graph.get(hostids=host[1], filter={'name': items},
-                sortfield="name", output="graphids")
+        response = zapi.graph.get(hostids=host[1],
+                filter={'name': items},
+                sortfield="name",
+                output="graphids")
         # pprint.pprint(response)
         graphids.extend(x['graphid'] for x in response)
     logging.info("graphids: %r" % graphids)
     return graphids
 
-def get_screen(zapi, groupname, hsize, vsize):
-    logging.info("Getting screen %s" % groupname)
-    response = zapi.screen.get(filter={'name': groupname})
+def get_screenid(zapi, screen_name):
+    logging.info("Getting screen %s .." % screen_name)
+    response = zapi.screen.get(filter={'name': screen_name})
     logging.info(response)
-    create_new = True
     if response:
         screenid = response[0]['screenid']
-        old_hsize, old_vsize = int(response[0]['hsize']), int(response[0]['vsize'])
-        if hsize != old_hsize or vsize != old_vsize:
-            logging.info("Deleting screen: %s" % screenid)
-            response = zapi.screen.delete(screenid)
-            logging.info(response)
-        else:
-            create_new = False
-    if create_new:
-        logging.info("Creating screen %s" % groupname)
-        response = zapi.screen.create(name=groupname, hsize=hsize, vsize=vsize)
+    else:
+        logging.info("Creating screen %s .." % screen_name)
+        response = zapi.screen.create(name=screen_name)
         logging.info(response)
         screenid = response['screenids'][0]
     return screenid
 
-def update_screen(zapi, screenid, graphids, vsize, hsize):
-    screenitems = [{"resourcetype": 0, "resourceid": graphids[x+y*vsize],
-                    "x": x, "y": y, "width": 500}
-            for x in range(vsize) for y in range(hsize)]
+def update_screen(zapi, screenid, graphids, hsize):
+    vsize = (len(graphids) + hsize - 1) // hsize
+    screenitems = [{"resourcetype": 0, "resourceid": graphids[x+y*hsize],
+            "x": x, "y": y, "width": 500, "height": 120}
+            for x in range(hsize) for y in range(vsize) if (x+y*hsize) < len(graphids)]
     logging.info("Updating screen %s" % screenid)
-    response = zapi.screen.update(screenid=screenid, screenitems=screenitems)
+    response = zapi.screen.update(screenid=screenid, screenitems=screenitems,
+            hsize=hsize, vsize=vsize)
     logging.info(response)
 
 def load_config(config_file):
@@ -67,10 +63,15 @@ def load_config(config_file):
     logging.debug("Load config: %r" % config)
     return config
 
+def get_host(zapi, hostname):
+    logging.info("Getting hostinfo of %s" % hostname)
+    response = zapi.host.get(filter={'name': hostname}, output=['name'])
+    logging.info(response)
+    return (response[0]['name'], response[0]['hostid'])
+
 def main(args):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
             format='%(asctime)s %(levelname)-8s %(message)s')
-
     config = load_config(args.config)
 
     # auth
@@ -82,14 +83,25 @@ def main(args):
     # group
     for group in config['groups']:
         items = group['items']
-        names = group['names']
-        for groupname in names:
+        if not group['names']: continue
+        for groupname in group['names']:
             logging.info("##### Updating %s .. #####" % groupname)
             groupid = get_groupid(zapi, groupname)
             hosts = get_hosts_in_group(zapi, groupid)
             graphids = get_graphs(zapi, hosts, items)
-            screenid = get_screen(zapi, groupname, len(items), len(hosts))
-            update_screen(zapi, screenid, graphids, len(items), len(hosts))
+            screenid = get_screenid(zapi, groupname)
+            update_screen(zapi, screenid, graphids, len(items))
+
+    # screens
+    for screen in config['screens']:
+        # pprint.pprint(screen)
+        logging.info("##### Updating screen %s .. #####" % screen['name'])
+        graphids = []
+        for graph in screen['graphs']:
+            host_name_ids = [get_host(zapi, hostname) for hostname in graph['hosts']]
+            graphids.extend(get_graphs(zapi, host_name_ids, graph['items']))
+        screenid = get_screenid(zapi, screen['name'])
+        update_screen(zapi, screenid, graphids, screen['span'])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="ss manager agent")
